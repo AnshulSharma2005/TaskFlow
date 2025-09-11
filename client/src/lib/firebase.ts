@@ -113,9 +113,7 @@ export const getUserTasks = async (userId: string, filters?: TaskFilters): Promi
     // Use the simplest possible query to avoid any index requirements
     const q = query(tasksRef, where("userId", "==", userId));
     
-    console.log("Executing Firebase query for user:", userId);
     const querySnapshot = await getDocs(q);
-    console.log("Firebase query returned", querySnapshot.docs.length, "documents");
     
     let results = querySnapshot.docs.map(doc => {
       const data = doc.data();
@@ -131,11 +129,8 @@ export const getUserTasks = async (userId: string, filters?: TaskFilters): Promi
     // Sort client-side by creation date (newest first)
     results.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
-    console.log("Tasks before filtering:", results.map(t => ({ id: t.id, title: t.title })));
-
     // Apply all filters client-side
     if (filters) {
-      const originalLength = results.length;
       
       results = results.filter(task => {
         // Completion status filter
@@ -207,12 +202,8 @@ export const getUserTasks = async (userId: string, filters?: TaskFilters): Promi
         
         return true;
       });
-
-      console.log(`Applied filters: ${originalLength} -> ${results.length} tasks`);
-      console.log("Active filters:", filters);
     }
 
-    console.log("Final results:", results.map(t => ({ id: t.id, title: t.title })));
     return results;
     
   } catch (error) {

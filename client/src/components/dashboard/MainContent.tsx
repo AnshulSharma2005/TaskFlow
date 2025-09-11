@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -25,22 +25,21 @@ export const MainContent = ({ onEditTask, refreshTrigger, currentView }: MainCon
   const { currentUser, userProfile } = useAuth();
   const { toast } = useToast();
 
-  const loadTasks = async (taskFilters?: TaskFilters) => {
+  // Load fresh data from network only (no filtering)
+  const loadTasks = async () => {
     if (!currentUser) return;
 
     try {
       setLoading(true);
-      const [filteredTasks, allTasksList, todayTasksList] = await Promise.all([
-        getUserTasks(currentUser.uid, taskFilters),
-        getUserTasks(currentUser.uid),
+      const [allTasksList, todayTasksList] = await Promise.all([
+        getUserTasks(currentUser.uid), // Fetch all tasks without filters
         getTodayTasks(currentUser.uid),
       ]);
 
-      setTasks(filteredTasks);
       setAllTasks(allTasksList);
       setTodayTasks(todayTasksList);
 
-      // Calculate stats from all tasks (not filtered)
+      // Calculate stats from all tasks
       const total = allTasksList.length;
       const completed = allTasksList.filter(t => t.completed).length;
       const pending = allTasksList.filter(t => !t.completed).length;
@@ -58,14 +57,99 @@ export const MainContent = ({ onEditTask, refreshTrigger, currentView }: MainCon
     }
   };
 
+  // Client-side filtering function
+  const applyFilters = (allTasks: Task[], filters: TaskFilters): Task[] => {
+    if (!filters || Object.keys(filters).length === 0) {
+      return allTasks;
+    }
+
+    return allTasks.filter(task => {
+      // Completion status filter
+      if (filters.completed !== undefined && task.completed !== filters.completed) {
+        return false;
+      }
+      
+      // Category filter
+      if (filters.category && task.category !== filters.category) {
+        return false;
+      }
+      
+      // Priority filter
+      if (filters.priority && task.priority !== filters.priority) {
+        return false;
+      }
+      
+      // Date filter
+      if (filters.dueDate) {
+        const now = new Date();
+        const taskDueDate = task.dueDate;
+        
+        switch (filters.dueDate) {
+          case 'today':
+            if (!taskDueDate) return false;
+            const today = new Date(now);
+            today.setHours(0, 0, 0, 0);
+            const tomorrow = new Date(today);
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            if (taskDueDate < today || taskDueDate >= tomorrow) return false;
+            break;
+            
+          case 'tomorrow':
+            if (!taskDueDate) return false;
+            const tomorrowStart = new Date(now);
+            tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+            tomorrowStart.setHours(0, 0, 0, 0);
+            const tomorrowEnd = new Date(tomorrowStart);
+            tomorrowEnd.setDate(tomorrowEnd.getDate() + 1);
+            if (taskDueDate < tomorrowStart || taskDueDate >= tomorrowEnd) return false;
+            break;
+            
+          case 'thisWeek':
+            if (!taskDueDate) return false;
+            const weekStart = new Date(now);
+            weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+            weekStart.setHours(0, 0, 0, 0);
+            const weekEnd = new Date(weekStart);
+            weekEnd.setDate(weekEnd.getDate() + 7);
+            if (taskDueDate < weekStart || taskDueDate >= weekEnd) return false;
+            break;
+            
+          case 'overdue':
+            if (!taskDueDate || task.completed) return false;
+            const nowStart = new Date(now);
+            nowStart.setHours(0, 0, 0, 0);
+            if (taskDueDate >= nowStart) return false;
+            break;
+        }
+      }
+      
+      // Search term filter (full-text search)
+      if (filters.searchTerm) {
+        const searchTerm = filters.searchTerm.toLowerCase();
+        const titleMatch = task.title.toLowerCase().includes(searchTerm);
+        const descriptionMatch = task.description && task.description.toLowerCase().includes(searchTerm);
+        if (!titleMatch && !descriptionMatch) return false;
+      }
+      
+      return true;
+    });
+  };
+
+  // Load fresh data from network when user changes or refresh is triggered
   useEffect(() => {
-    loadTasks(filters);
-  }, [currentUser, refreshTrigger, filters]);
+    loadTasks();
+  }, [currentUser, refreshTrigger]);
+
+  // Apply filters client-side whenever allTasks or filters change
+  useEffect(() => {
+    const filteredTasks = applyFilters(allTasks, filters);
+    setTasks(filteredTasks);
+  }, [allTasks, filters]);
 
   const handleToggleTask = async (taskId: string, completed: boolean) => {
     try {
       await updateTask(taskId, { completed });
-      await loadTasks(filters);
+      await loadTasks(); // Reload fresh data from network
       toast({
         title: completed ? "Task completed!" : "Task marked incomplete",
         description: "Task status updated successfully.",
@@ -82,7 +166,7 @@ export const MainContent = ({ onEditTask, refreshTrigger, currentView }: MainCon
   const handleDeleteTask = async (taskId: string) => {
     try {
       await deleteTask(taskId);
-      await loadTasks(filters);
+      await loadTasks(); // Reload fresh data from network
       toast({
         title: "Task deleted",
         description: "Task has been permanently removed.",
@@ -358,7 +442,14 @@ export const MainContent = ({ onEditTask, refreshTrigger, currentView }: MainCon
       </div>
 
       {/* Search and Filters */}
-      <TaskFiltersComponent filters={filters} onFiltersChange={setFilters} />
+      <TaskFiltersComponent 
+        filters={filters} 
+        onFiltersChange={(newFilters) => {
+          // Only update filters - no network calls
+          // Client-side filtering will happen automatically via useEffect
+          setFilters(newFilters);
+        }} 
+      />
       
       {/* Results Message */}
       {getResultsMessage()}
