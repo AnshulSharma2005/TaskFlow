@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
@@ -12,13 +12,27 @@ interface TaskFiltersProps {
 
 export const TaskFilters = ({ filters, onFiltersChange }: TaskFiltersProps) => {
   const [searchTerm, setSearchTerm] = useState(filters.searchTerm || "");
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Debounced search effect
+  useEffect(() => {
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    
+    searchTimeoutRef.current = setTimeout(() => {
+      onFiltersChange({ ...filters, searchTerm: searchTerm || undefined });
+    }, 300);
+    
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, [searchTerm]);
 
   const handleSearchChange = (value: string) => {
     setSearchTerm(value);
-    const timer = setTimeout(() => {
-      onFiltersChange({ ...filters, searchTerm: value || undefined });
-    }, 300); // Debounce search
-    return () => clearTimeout(timer);
   };
 
   const handleFilterChange = (key: keyof FilterType, value: any) => {
@@ -145,6 +159,7 @@ export const TaskFilters = ({ filters, onFiltersChange }: TaskFiltersProps) => {
               <button
                 onClick={() => handleFilterChange('searchTerm', undefined)}
                 className="ml-1 hover:bg-secondary-foreground/20 rounded-full p-0.5"
+                data-testid="button-remove-filter-search"
               >
                 <i className="fas fa-times text-xs"></i>
               </button>
@@ -156,6 +171,7 @@ export const TaskFilters = ({ filters, onFiltersChange }: TaskFiltersProps) => {
               <button
                 onClick={() => handleFilterChange('category', undefined)}
                 className="ml-1 hover:bg-secondary-foreground/20 rounded-full p-0.5"
+                data-testid="button-remove-filter-category"
               >
                 <i className="fas fa-times text-xs"></i>
               </button>
@@ -167,6 +183,7 @@ export const TaskFilters = ({ filters, onFiltersChange }: TaskFiltersProps) => {
               <button
                 onClick={() => handleFilterChange('priority', undefined)}
                 className="ml-1 hover:bg-secondary-foreground/20 rounded-full p-0.5"
+                data-testid="button-remove-filter-priority"
               >
                 <i className="fas fa-times text-xs"></i>
               </button>
@@ -178,6 +195,7 @@ export const TaskFilters = ({ filters, onFiltersChange }: TaskFiltersProps) => {
               <button
                 onClick={() => handleFilterChange('dueDate', undefined)}
                 className="ml-1 hover:bg-secondary-foreground/20 rounded-full p-0.5"
+                data-testid="button-remove-filter-due-date"
               >
                 <i className="fas fa-times text-xs"></i>
               </button>
@@ -189,6 +207,7 @@ export const TaskFilters = ({ filters, onFiltersChange }: TaskFiltersProps) => {
               <button
                 onClick={() => handleFilterChange('completed', undefined)}
                 className="ml-1 hover:bg-secondary-foreground/20 rounded-full p-0.5"
+                data-testid="button-remove-filter-status"
               >
                 <i className="fas fa-times text-xs"></i>
               </button>

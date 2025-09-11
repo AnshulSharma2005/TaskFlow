@@ -78,11 +78,19 @@ export const createTask = async (task: InsertTask): Promise<string> => {
 
 export const updateTask = async (taskId: string, updates: Partial<InsertTask>) => {
   const taskRef = doc(db, "tasks", taskId);
-  await updateDoc(taskRef, {
+  
+  // Build the update object conditionally to avoid overwriting dueDate
+  const updateData: any = {
     ...updates,
-    dueDate: updates.dueDate ? Timestamp.fromDate(updates.dueDate) : null,
     updatedAt: Timestamp.now(),
-  });
+  };
+  
+  // Only update dueDate if it's explicitly provided in updates
+  if ('dueDate' in updates) {
+    updateData.dueDate = updates.dueDate ? Timestamp.fromDate(updates.dueDate) : null;
+  }
+  
+  await updateDoc(taskRef, updateData);
 };
 
 export const deleteTask = async (taskId: string) => {
