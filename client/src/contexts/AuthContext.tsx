@@ -48,12 +48,18 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
           
           if (!profile) {
             // Create user profile if it doesn't exist
-            const newUserProfile = {
+            const newUserProfile: any = {
               id: user.uid,
               email: user.email!,
-              displayName: user.displayName || undefined,
-              photoURL: user.photoURL || undefined,
             };
+            
+            // Only include optional fields if they have values
+            if (user.displayName) {
+              newUserProfile.displayName = user.displayName;
+            }
+            if (user.photoURL) {
+              newUserProfile.photoURL = user.photoURL;
+            }
             await createUserProfile(newUserProfile);
             profile = await getUserProfile(user.uid);
           }

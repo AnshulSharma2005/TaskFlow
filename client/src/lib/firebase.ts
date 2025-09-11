@@ -4,12 +4,12 @@ import { getFirestore, doc, setDoc, getDoc, collection, addDoc, updateDoc, delet
 import type { User, Task, InsertTask, InsertUser } from "@shared/schema";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyCRUbgSNA3xQM0YzS9qrQuRDusxnqsE3Zw",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyCRUbgSNA3xQM0YzS9qrQuRDusxnqsE3Zw",
   authDomain: "taskflow-37dc4.firebaseapp.com",
-  projectId: "taskflow-37dc4",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "taskflow-37dc4",
   storageBucket: "taskflow-37dc4.firebasestorage.app",
   messagingSenderId: "208090367619",
-  appId: "1:208090367619:web:c2f3180d31e979ce147db6",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:208090367619:web:c2f3180d31e979ce147db6",
   measurementId: "G-0JH819S721"
 };
 
@@ -90,62 +90,156 @@ export const deleteTask = async (taskId: string) => {
   await deleteDoc(taskRef);
 };
 
-export const getUserTasks = async (userId: string, filters?: { completed?: boolean }): Promise<Task[]> => {
+export interface TaskFilters {
+  completed?: boolean;
+  category?: string;
+  priority?: string;
+  dueDate?: 'today' | 'tomorrow' | 'thisWeek' | 'overdue';
+  searchTerm?: string;
+}
+
+export const getUserTasks = async (userId: string, filters?: TaskFilters): Promise<Task[]> => {
   const tasksRef = collection(db, "tasks");
-  let q = query(
-    tasksRef,
-    where("userId", "==", userId),
-    orderBy("createdAt", "desc")
-  );
+  
+  try {
+    // Use the simplest possible query to avoid any index requirements
+    const q = query(tasksRef, where("userId", "==", userId));
+    
+    console.log("Executing Firebase query for user:", userId);
+    const querySnapshot = await getDocs(q);
+    console.log("Firebase query returned", querySnapshot.docs.length, "documents");
+    
+    let results = querySnapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        ...data,
+        dueDate: data.dueDate ? data.dueDate.toDate() : undefined,
+        createdAt: data.createdAt.toDate(),
+        updatedAt: data.updatedAt.toDate(),
+      } as Task;
+    });
 
-  if (filters?.completed !== undefined) {
-    q = query(
-      tasksRef,
-      where("userId", "==", userId),
-      where("completed", "==", filters.completed),
-      orderBy("createdAt", "desc")
-    );
+    // Sort client-side by creation date (newest first)
+    results.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+    console.log("Tasks before filtering:", results.map(t => ({ id: t.id, title: t.title })));
+
+    // Apply all filters client-side
+    if (filters) {
+      const originalLength = results.length;
+      
+      results = results.filter(task => {
+        // Completion status filter
+        if (filters.completed !== undefined && task.completed !== filters.completed) {
+          return false;
+        }
+        
+        // Category filter
+        if (filters.category && task.category !== filters.category) {
+          return false;
+        }
+        
+        // Priority filter
+        if (filters.priority && task.priority !== filters.priority) {
+          return false;
+        }
+        
+        // Date filter
+        if (filters.dueDate) {
+          const now = new Date();
+          const taskDueDate = task.dueDate;
+          
+          switch (filters.dueDate) {
+            case 'today':
+              if (!taskDueDate) return false;
+              const today = new Date(now);
+              today.setHours(0, 0, 0, 0);
+              const tomorrow = new Date(today);
+              tomorrow.setDate(tomorrow.getDate() + 1);
+              if (taskDueDate < today || taskDueDate >= tomorrow) return false;
+              break;
+              
+            case 'tomorrow':
+              if (!taskDueDate) return false;
+              const tomorrowStart = new Date(now);
+              tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+              tomorrowStart.setHours(0, 0, 0, 0);
+              const tomorrowEnd = new Date(tomorrowStart);
+              tomorrowEnd.setDate(tomorrowEnd.getDate() + 1);
+              if (taskDueDate < tomorrowStart || taskDueDate >= tomorrowEnd) return false;
+              break;
+              
+            case 'thisWeek':
+              if (!taskDueDate) return false;
+              const weekStart = new Date(now);
+              weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+              weekStart.setHours(0, 0, 0, 0);
+              const weekEnd = new Date(weekStart);
+              weekEnd.setDate(weekEnd.getDate() + 7);
+              if (taskDueDate < weekStart || taskDueDate >= weekEnd) return false;
+              break;
+              
+            case 'overdue':
+              if (!taskDueDate || task.completed) return false;
+              const nowStart = new Date(now);
+              nowStart.setHours(0, 0, 0, 0);
+              if (taskDueDate >= nowStart) return false;
+              break;
+          }
+        }
+        
+        // Search term filter (full-text search)
+        if (filters.searchTerm) {
+          const searchTerm = filters.searchTerm.toLowerCase();
+          const titleMatch = task.title.toLowerCase().includes(searchTerm);
+          const descriptionMatch = task.description && task.description.toLowerCase().includes(searchTerm);
+          if (!titleMatch && !descriptionMatch) return false;
+        }
+        
+        return true;
+      });
+
+      console.log(`Applied filters: ${originalLength} -> ${results.length} tasks`);
+      console.log("Active filters:", filters);
+    }
+
+    console.log("Final results:", results.map(t => ({ id: t.id, title: t.title })));
+    return results;
+    
+  } catch (error) {
+    console.error("Error fetching tasks:", error);
+    throw error;
   }
-
-  const querySnapshot = await getDocs(q);
-  return querySnapshot.docs.map(doc => {
-    const data = doc.data();
-    return {
-      id: doc.id,
-      ...data,
-      dueDate: data.dueDate ? data.dueDate.toDate() : undefined,
-      createdAt: data.createdAt.toDate(),
-      updatedAt: data.updatedAt.toDate(),
-    } as Task;
-  });
 };
 
 export const getTodayTasks = async (userId: string): Promise<Task[]> => {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
+  try {
+    // Get all user tasks and filter client-side to avoid index requirements
+    const allTasks = await getUserTasks(userId);
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
 
-  const tasksRef = collection(db, "tasks");
-  const q = query(
-    tasksRef,
-    where("userId", "==", userId),
-    where("dueDate", ">=", Timestamp.fromDate(today)),
-    where("dueDate", "<", Timestamp.fromDate(tomorrow)),
-    orderBy("dueDate", "asc")
-  );
+    // Filter for today's tasks client-side
+    const todayTasks = allTasks.filter(task => {
+      if (!task.dueDate) return false;
+      return task.dueDate >= today && task.dueDate < tomorrow;
+    });
 
-  const querySnapshot = await getDocs(q);
-  return querySnapshot.docs.map(doc => {
-    const data = doc.data();
-    return {
-      id: doc.id,
-      ...data,
-      dueDate: data.dueDate ? data.dueDate.toDate() : undefined,
-      createdAt: data.createdAt.toDate(),
-      updatedAt: data.updatedAt.toDate(),
-    } as Task;
-  });
+    // Sort by due date ascending
+    todayTasks.sort((a, b) => {
+      if (!a.dueDate || !b.dueDate) return 0;
+      return a.dueDate.getTime() - b.dueDate.getTime();
+    });
+
+    return todayTasks;
+  } catch (error) {
+    console.error("Error fetching today's tasks:", error);
+    throw error;
+  }
 };
 
 export { onAuthStateChanged };

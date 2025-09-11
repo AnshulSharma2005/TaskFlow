@@ -3,8 +3,9 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/contexts/AuthContext";
-import { getUserTasks, getTodayTasks, updateTask, deleteTask } from "@/lib/firebase";
+import { getUserTasks, getTodayTasks, updateTask, deleteTask, type TaskFilters } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
+import { TaskFilters as TaskFiltersComponent } from "./TaskFilters";
 import type { Task, TaskStats } from "@shared/schema";
 import { format } from "date-fns";
 
@@ -16,29 +17,33 @@ interface MainContentProps {
 
 export const MainContent = ({ onEditTask, refreshTrigger, currentView }: MainContentProps) => {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [allTasks, setAllTasks] = useState<Task[]>([]);
   const [todayTasks, setTodayTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<TaskStats>({ total: 0, completed: 0, inProgress: 0, pending: 0 });
+  const [filters, setFilters] = useState<TaskFilters>({});
   const { currentUser, userProfile } = useAuth();
   const { toast } = useToast();
 
-  const loadTasks = async () => {
+  const loadTasks = async (taskFilters?: TaskFilters) => {
     if (!currentUser) return;
 
     try {
       setLoading(true);
-      const [allTasks, todayTasksList] = await Promise.all([
+      const [filteredTasks, allTasksList, todayTasksList] = await Promise.all([
+        getUserTasks(currentUser.uid, taskFilters),
         getUserTasks(currentUser.uid),
         getTodayTasks(currentUser.uid),
       ]);
 
-      setTasks(allTasks);
+      setTasks(filteredTasks);
+      setAllTasks(allTasksList);
       setTodayTasks(todayTasksList);
 
-      // Calculate stats
-      const total = allTasks.length;
-      const completed = allTasks.filter(t => t.completed).length;
-      const pending = allTasks.filter(t => !t.completed).length;
+      // Calculate stats from all tasks (not filtered)
+      const total = allTasksList.length;
+      const completed = allTasksList.filter(t => t.completed).length;
+      const pending = allTasksList.filter(t => !t.completed).length;
       const inProgress = pending; // For this implementation, pending = in progress
 
       setStats({ total, completed, inProgress, pending });
@@ -54,13 +59,13 @@ export const MainContent = ({ onEditTask, refreshTrigger, currentView }: MainCon
   };
 
   useEffect(() => {
-    loadTasks();
-  }, [currentUser, refreshTrigger]);
+    loadTasks(filters);
+  }, [currentUser, refreshTrigger, filters]);
 
   const handleToggleTask = async (taskId: string, completed: boolean) => {
     try {
       await updateTask(taskId, { completed });
-      await loadTasks();
+      await loadTasks(filters);
       toast({
         title: completed ? "Task completed!" : "Task marked incomplete",
         description: "Task status updated successfully.",
@@ -77,7 +82,7 @@ export const MainContent = ({ onEditTask, refreshTrigger, currentView }: MainCon
   const handleDeleteTask = async (taskId: string) => {
     try {
       await deleteTask(taskId);
-      await loadTasks();
+      await loadTasks(filters);
       toast({
         title: "Task deleted",
         description: "Task has been permanently removed.",
@@ -187,6 +192,22 @@ export const MainContent = ({ onEditTask, refreshTrigger, currentView }: MainCon
     );
   }
 
+  const getResultsMessage = () => {
+    const hasFilters = Object.values(filters).some(v => v !== undefined);
+    if (!hasFilters) return null;
+    
+    return (
+      <div className="mb-6 p-3 bg-muted/50 rounded-md">
+        <p className="text-sm text-muted-foreground">
+          {tasks.length === 0 
+            ? "No tasks found matching your filters" 
+            : `Found ${tasks.length} task${tasks.length !== 1 ? 's' : ''} matching your filters`
+          }
+        </p>
+      </div>
+    );
+  };
+
   return (
     <main className="flex-1 p-6">
       {/* Dashboard Header */}
@@ -196,6 +217,12 @@ export const MainContent = ({ onEditTask, refreshTrigger, currentView }: MainCon
         </h2>
         <p className="text-muted-foreground">Here's what you have planned for today</p>
       </div>
+
+      {/* Search and Filters */}
+      <TaskFiltersComponent filters={filters} onFiltersChange={setFilters} />
+      
+      {/* Results Message */}
+      {getResultsMessage()}
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -258,15 +285,22 @@ export const MainContent = ({ onEditTask, refreshTrigger, currentView }: MainCon
           </div>
         </div>
 
-        {/* All Tasks */}
+        {/* Filtered Tasks */}
         <div className="bg-card border border-border rounded-lg p-6">
-          <h3 className="text-lg font-semibold text-foreground mb-6">Recent Tasks</h3>
+          <h3 className="text-lg font-semibold text-foreground mb-6">
+            {Object.values(filters).some(v => v !== undefined) ? 'Filtered Tasks' : 'Recent Tasks'}
+          </h3>
           
-          <div className="space-y-4" data-testid="list-all-tasks">
+          <div className="space-y-4" data-testid="list-filtered-tasks">
             {tasks.length === 0 ? (
-              <p className="text-muted-foreground text-center py-8">No tasks yet. Create your first task!</p>
+              <p className="text-muted-foreground text-center py-8">
+                {Object.values(filters).some(v => v !== undefined) 
+                  ? "No tasks match your current filters"
+                  : "No tasks yet. Create your first task!"
+                }
+              </p>
             ) : (
-              tasks.slice(0, 5).map((task) => (
+              tasks.map((task) => (
                 <TaskItem key={task.id} task={task} />
               ))
             )}
